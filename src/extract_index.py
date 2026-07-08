@@ -49,6 +49,8 @@ def main():
     ap.add_argument("--member", default="", help="회사코드 한정(L34 등)")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--doc-types", default="TERMS")
+    ap.add_argument("--reextract", action="store_true",
+                    help="대상 문서의 기존 clauses를 지우고 다시 추출")
     args = ap.parse_args()
 
     conn = open_db()
@@ -61,6 +63,12 @@ def main():
         q += " AND member_cd=?"
         params.append(args.member)
     docs = conn.execute(q, params).fetchall()
+
+    if args.reextract:
+        doc_ids = [d[0] for d in docs]
+        conn.executemany("DELETE FROM clauses WHERE doc_id=?", [(x,) for x in doc_ids])
+        conn.commit()
+        print(f"재추출: {len(doc_ids)}개 문서 clauses 삭제")
 
     done_ids = {r[0] for r in conn.execute("SELECT DISTINCT doc_id FROM clauses")}
     todo = [d for d in docs if d[0] not in done_ids]
