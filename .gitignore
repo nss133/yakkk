@@ -16,3 +16,6 @@ logs_*.log
 
 # OS
 .DS_Store
+
+# 배포 패키지(대용량 DB 포함, git 대상 아님)
+_dist/
