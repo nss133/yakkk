@@ -16,6 +16,7 @@ import re
 import fitz
 
 from common import ROOT, open_db
+from clause_split import split_clauses
 
 CLAUSES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS clauses (
@@ -29,56 +30,6 @@ CREATE TABLE IF NOT EXISTS clauses (
 );
 CREATE INDEX IF NOT EXISTS idx_clauses_doc ON clauses(doc_id);
 """
-
-# 제N조 / 제N조의M — 행 시작에서만 (인라인 본문 시작 허용)
-RE_JO = re.compile(r"^\s*(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*(?:\(([^)]{1,60})\))?\s*(.*)$")
-# 별표 N (제목)
-RE_BYULPYO = re.compile(r"^\s*[\[(【]?\s*(별\s*표\s*\d*)\s*[\])】]?\s*(.{0,60})$")
-
-
-def norm_no(s: str) -> str:
-    return re.sub(r"\s+", "", s)
-
-
-def split_clauses(text: str):
-    """문서 전체를 순차 청크로 분할. 반환: [(clause_no|None, title, text)]"""
-    lines = text.split("\n")
-    chunks = []
-    cur_no, cur_title, cur_lines = None, "", []
-
-    def flush():
-        nonlocal cur_no, cur_title, cur_lines
-        body = "\n".join(cur_lines).strip()
-        if body or cur_no:
-            chunks.append((cur_no, cur_title, body))
-        cur_no, cur_title, cur_lines = None, "", []
-
-    for ln in lines:
-        m = RE_JO.match(ln)
-        if m:
-            flush()
-            cur_no = norm_no(m.group(1))
-            cur_title = (m.group(2) or "").strip()
-            rest = (m.group(3) or "").strip()
-            cur_lines = [rest] if rest else []
-            continue
-        mb = RE_BYULPYO.match(ln)
-        if mb and len(ln.strip()) < 70:
-            flush()
-            cur_no = norm_no(mb.group(1))
-            cur_title = mb.group(2).strip()
-            cur_lines = []
-            continue
-        cur_lines.append(ln)
-    flush()
-
-    # 앞부분 전문(제1조 이전) 라벨
-    out = []
-    for i, (no, title, body) in enumerate(chunks):
-        if no is None:
-            title = title or ("[전문]" if i == 0 else "[본문외]")
-        out.append((no, title, body))
-    return out
 
 
 def extract_pdf_text(path) -> str:
