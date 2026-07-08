@@ -1,0 +1,18 @@
+# 대용량 원본·산출물 (재생성 가능 / 내부 검토 목적, 재배포 금지)
+# 약관 PDF 원본 (~10GB, 사외 보관 원칙)
+data/
+# SQLite (terms.db, terms_dist*.db — update_all.py로 재생성)
+db/*.db
+# 협회 카탈로그 HTML 스냅샷 (재수집 가능)
+catalog/raw/
+
+# 실행 환경·로그
+.venv/
+__pycache__/
+*.pyc
+logs/
+logs_*.log
+*.log
+
+# OS
+.DS_Store
