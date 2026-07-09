@@ -57,6 +57,7 @@ def main():
             ok &= run(f"3. 수집({name})", [script] + extra, f"collect_{script.split('_')[1].split('.')[0]}")
 
     ok &= run("4. 텍스트 추출", ["extract_index.py"], "extract")
+    ok &= run("4b. 유사인덱스", ["build_simindex.py"], "simindex")
     ok &= run("5. 매칭 재구축", ["build_matches.py"], "matches")
     ok &= run("5b. 섹션 태깅", ["enrich_sections.py"], "enrich")
     ok &= run("6a. 반입DB(전체판)", ["export_dist.py"], "export")
