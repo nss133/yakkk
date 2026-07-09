@@ -25,10 +25,14 @@ def main():
     src = sqlite3.connect(DB_PATH)
     src.execute(f"ATTACH DATABASE '{DIST_PATH}' AS dist")
 
-    for tbl in ("insurers", "products", "documents", "clauses", "product_doc_map"):
-        ddl = src.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
-        ).fetchone()[0]
+    for tbl in ("insurers", "products", "documents", "clauses", "product_doc_map",
+                "ngram_idf", "simindex_meta"):
+        ddl_row = src.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tbl,)).fetchone()
+        if ddl_row is None:
+            print(f"  (건너뜀: {tbl} 없음 — build_simindex 먼저 실행 권장)")
+            continue
+        ddl = ddl_row[0]
         src.execute(ddl.replace(f"TABLE {tbl}", f"TABLE dist.{tbl}", 1)
                        .replace(f"TABLE IF NOT EXISTS {tbl}", f"TABLE IF NOT EXISTS dist.{tbl}", 1))
         if args.current_only and tbl == "documents":
