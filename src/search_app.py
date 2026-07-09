@@ -61,7 +61,7 @@ def _parse_multipart(headers, body: bytes):
     ctype = headers.get("Content-Type", "")
     if "boundary=" not in ctype:
         return {}
-    boundary = ("--" + ctype.split("boundary=", 1)[1].strip()).encode()
+    boundary = ("--" + ctype.split("boundary=", 1)[1].strip().strip('"')).encode()
     fields = {}
     for part in body.split(boundary):
         if not part.strip() or part.strip() == b"--":
@@ -76,7 +76,7 @@ def _parse_multipart(headers, body: bytes):
             if tok.startswith("name="):
                 name = tok.split("=", 1)[1].strip().strip('"')
         if name:
-            fields[name] = data.rstrip(b"\r\n")
+            fields[name] = data[:-2] if data.endswith(b"\r\n") else data
     return fields
 
 
