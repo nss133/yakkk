@@ -76,3 +76,18 @@ def test_golden_q3_청약철회():
         "청약" in (r["title"] or "") and "철회" in (r["title"] or "")
         for r in rows
     ), f"top-5에 '청약의 철회' 계열 조항 없음: {[r['title'] for r in rows]}"
+
+
+def test_golden_standard_life_보험금지급사유():
+    # 초안 조문(사망보험금 지급) → doc_type=STANDARD로 좁히면 생명보험 표준약관의
+    # 대응 조문이 최상위로 잡혀야 한다(member_cd가 STD로 시작).
+    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
+    idf, d = simmatch.load_idf(c)
+    q = "피보험자가 보험기간 중 사망하였을 때 회사는 사망보험금을 지급합니다"
+    std = simmatch.db_similar(c, q, idf, d, top_n=3, doc_type="STANDARD")
+    c.close()
+    assert std, "표준약관 대응 조문이 있어야 함"
+    top = std[0]
+    # 생명보험 표준약관의 보험금 지급사유 조문이 최상위
+    assert top["member_cd"].startswith("STD")
+    assert "보험금" in (top["title"] or "") or "지급" in (top["title"] or "")

@@ -37,7 +37,8 @@ def main():
                        .replace(f"TABLE IF NOT EXISTS {tbl}", f"TABLE IF NOT EXISTS dist.{tbl}", 1))
         if args.current_only and tbl == "documents":
             src.execute("INSERT INTO dist.documents SELECT * FROM main.documents "
-                        "WHERE TRIM(version_label) LIKE '%~' OR version_label LIKE '%현재' OR version_label=''")
+                        "WHERE doc_type='STANDARD' OR TRIM(version_label) LIKE '%~' "
+                        "OR version_label LIKE '%현재' OR version_label=''")
         elif args.current_only and tbl == "product_doc_map":
             src.execute("INSERT INTO dist.product_doc_map SELECT m.* FROM main.product_doc_map m "
                         "JOIN dist.documents d USING(doc_id)")
