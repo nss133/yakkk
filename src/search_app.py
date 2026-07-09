@@ -33,6 +33,7 @@ PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
  a{color:#0a58ca;text-decoration:none} form{line-height:2.2}
 </style></head><body>
 <h1>약관 DB 검색 <span class="meta">__DBNAME__ · 문서 __NDOCS__건 · 조문 __NCLS__건</span></h1>
+<p><a href="/review">📄 초안 docx 일괄 심사</a> · <a href="/similar_text">✍️ 조문 붙여넣기 비교</a></p>
 <form method="get" action="/">
  <input type="text" id="q" name="q" value="__Q__" placeholder="검색어 (공백=AND, &quot;구문&quot;, 접두어*)">
  <select name="scope">__SCOPE__</select>
@@ -53,6 +54,30 @@ RIDER_OPTS = [("", "주계약+특약"), ("main", "주계약만"), ("rider", "특
 def opts(pairs, sel):
     return "".join(f'<option value="{v}"{" selected" if v == sel else ""}>{html.escape(t)}</option>'
                    for v, t in pairs)
+
+
+def _parse_multipart(headers, body: bytes):
+    """multipart/form-data → {필드명: 값(bytes)}. cgi 미사용(3.13+ 대응)."""
+    ctype = headers.get("Content-Type", "")
+    if "boundary=" not in ctype:
+        return {}
+    boundary = ("--" + ctype.split("boundary=", 1)[1].strip()).encode()
+    fields = {}
+    for part in body.split(boundary):
+        if not part.strip() or part.strip() == b"--":
+            continue
+        head, sep, data = part.partition(b"\r\n\r\n")
+        if not sep:
+            continue
+        head_txt = head.decode("utf-8", "replace")
+        name = None
+        for tok in head_txt.split(";"):
+            tok = tok.strip()
+            if tok.startswith("name="):
+                name = tok.split("=", 1)[1].strip().strip('"')
+        if name:
+            fields[name] = data.rstrip(b"\r\n")
+    return fields
 
 
 class App(http.server.BaseHTTPRequestHandler):
@@ -129,6 +154,8 @@ class App(http.server.BaseHTTPRequestHandler):
                 self.similar_by_clause(int(qs["id"]))
             elif u.path == "/similar_text":
                 self.similar_by_text(qs.get("t", ""))
+            elif u.path == "/review":
+                self.review_form()
             else:
                 self.search(qs)
         except Exception as e:
@@ -136,11 +163,13 @@ class App(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length).decode("utf-8", "replace")
-        qs = {k: v[0] for k, v in urllib.parse.parse_qs(body).items()}
+        raw = self.rfile.read(length)
         u = urllib.parse.urlparse(self.path)
         try:
-            if u.path == "/similar_text":
+            if u.path == "/review":
+                self.review_post(raw)
+            elif u.path == "/similar_text":
+                qs = {k: v[0] for k, v in urllib.parse.parse_qs(raw.decode("utf-8", "replace")).items()}
                 self.similar_by_text(qs.get("t", ""))
             else:
                 self.send_page("<p>알 수 없는 요청</p>")
@@ -180,6 +209,42 @@ class App(http.server.BaseHTTPRequestHandler):
             parts.append(f"<h2>{html.escape(head)}</h2>{self.render_similar(rows)}")
         c.close()
         self.send_page(form + "".join(parts))
+
+    def review_form(self, msg=""):
+        try:
+            import docx  # noqa: F401
+            avail = ""
+        except Exception:
+            avail = "<p style='color:#933'>python-docx 미설치 — 업로드 비활성(붙여넣기는 /similar_text 사용)</p>"
+        self.send_page(
+            f"{avail}{msg}<form method='post' action='/review' enctype='multipart/form-data'>"
+            "<p class='meta'>심사할 초안 약관(.docx)을 올리면 조문별 유사 타사 조문을 붙여줍니다.</p>"
+            "<input type='file' name='f' accept='.docx'> <button>일괄 심사</button></form>")
+
+    def review_post(self, raw):
+        fields = _parse_multipart(self.headers, raw)
+        blob = fields.get("f")
+        if not blob or len(blob) < 100:
+            self.review_form("<p>파일이 비어 있음</p>"); return
+        import io
+        from docx_split import docx_to_text
+        try:
+            text = docx_to_text(io.BytesIO(blob))
+        except Exception as e:
+            self.review_form(f"<p>docx 파싱 실패: {html.escape(str(e))}</p>"); return
+        from clause_split import split_clauses
+        blocks = [(no, ti, body) for no, ti, body in split_clauses(text)
+                  if no and (body or "").strip()]
+        c = self.conn()
+        parts = [f"<p class='meta'>초안 조문 {len(blocks)}건 심사</p>"]
+        for no, ti, body in blocks:
+            rows = simmatch.db_similar(c, body, self.idf, self.default_idf, top_n=5,
+                                       exclude_member=self.self_member, query_title=ti)
+            head = f"{no} {ti}".strip()
+            parts.append(f"<h2>{html.escape(head)}</h2>"
+                         f"<pre>{html.escape(body[:400])}</pre>{self.render_similar(rows)}")
+        c.close()
+        self.send_page("".join(parts))
 
     def search(self, qs):
         q = qs.get("q", "").strip()
