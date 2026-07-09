@@ -13,10 +13,13 @@ import argparse
 import html
 import http.server
 import pathlib
+import re
 import sqlite3
 import urllib.parse
 
 import simmatch
+
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB — docx 초안은 소용량, 넉넉히 상한선만 방어
 
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>약관 DB 검색</title>
@@ -54,6 +57,32 @@ RIDER_OPTS = [("", "주계약+특약"), ("main", "주계약만"), ("rider", "특
 def opts(pairs, sel):
     return "".join(f'<option value="{v}"{" selected" if v == sel else ""}>{html.escape(t)}</option>'
                    for v, t in pairs)
+
+
+def _highlight_words(query, max_words=30):
+    """검색어에서 변별력 있는 어절을 추출 — simmatch.fts_query와 동일한 토큰화 방식.
+    유사조문 결과가 '왜 닮았는지' 근거로 겹친 표현을 하이라이트하는 데 사용."""
+    toks = re.findall(r"[가-힣a-z0-9]{2,}", (query or "").lower())
+    seen, words = set(), []
+    for t in toks:
+        if t not in seen:
+            seen.add(t)
+            words.append(t)
+        if len(words) >= max_words:
+            break
+    return words
+
+
+def _highlight(text, words):
+    """text를 먼저 html.escape한 뒤, 이스케이프된 words와 대소문자 무시 매칭해 <mark>로 감쌈.
+    순서 중요: escape 먼저 → 매칭/wrap 나중(XSS·이중이스케이프 방지)."""
+    esc = html.escape(text or "")
+    for w in sorted(words, key=len, reverse=True):  # 긴 단어 먼저 — 중첩 부분매치 방지
+        if not w:
+            continue
+        ew = html.escape(w)
+        esc = re.sub(re.escape(ew), lambda m: f"<mark>{m.group(0)}</mark>", esc, flags=re.IGNORECASE)
+    return esc
 
 
 def _parse_multipart(headers, body: bytes):
@@ -119,9 +148,10 @@ class App(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     @staticmethod
-    def render_similar(rows):
+    def render_similar(rows, query=""):
         if not rows:
             return "<p>유사한 타사 조문이 없음</p>"
+        hlwords = _highlight_words(query)
         by = {}
         for r in rows:
             by.setdefault(r["insurer"], []).append(r)
@@ -137,7 +167,7 @@ class App(http.server.BaseHTTPRequestHandler):
                     f"<div class='meta'>{html.escape(r['version_label'] or '')}</div></td>"
                     f"<td><a href='/clause?id={r['clause_id']}'>{html.escape(r['clause_no'] or '')} "
                     f"{html.escape(r['title'] or '')}</a></td>"
-                    f"<td class='meta'>{html.escape((r['text'] or '')[:120])}…</td></tr>")
+                    f"<td class='meta'>{_highlight((r['text'] or '')[:120], hlwords)}…</td></tr>")
             out.append("</table>")
         return "".join(out)
 
@@ -163,6 +193,9 @@ class App(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
+        if length > MAX_UPLOAD_BYTES:
+            self.send_page("<p>업로드 크기 초과</p>")
+            return
         raw = self.rfile.read(length)
         u = urllib.parse.urlparse(self.path)
         try:
@@ -178,7 +211,7 @@ class App(http.server.BaseHTTPRequestHandler):
 
     def similar_by_clause(self, cid):
         c = self.conn()
-        r = c.execute("SELECT c.text, c.title, d.member_cd FROM clauses c "
+        r = c.execute("SELECT c.text, c.title FROM clauses c "
                       "JOIN documents d USING(doc_id) WHERE clause_id=?", (cid,)).fetchone()
         if not r:
             c.close(); self.send_page("<p>조문 없음</p>"); return
@@ -186,7 +219,7 @@ class App(http.server.BaseHTTPRequestHandler):
                                    top_n=15, exclude_member=self.self_member,
                                    query_title=r["title"])
         c.close()
-        self.send_page(f"<p class='meta'>이 조문과 닮은 타사 조문</p>{self.render_similar(rows)}")
+        self.send_page(f"<p class='meta'>이 조문과 닮은 타사 조문</p>{self.render_similar(rows, query=r['text'])}")
 
     def similar_by_text(self, text):
         text = (text or "").strip()
@@ -206,7 +239,7 @@ class App(http.server.BaseHTTPRequestHandler):
             head = f"{no or ''} {ti or ''}".strip() or "(붙여넣은 조문)"
             rows = simmatch.db_similar(c, body, self.idf, self.default_idf, top_n=10,
                                        exclude_member=self.self_member, query_title=ti)
-            parts.append(f"<h2>{html.escape(head)}</h2>{self.render_similar(rows)}")
+            parts.append(f"<h2>{html.escape(head)}</h2>{self.render_similar(rows, query=body)}")
         c.close()
         self.send_page(form + "".join(parts))
 
@@ -242,7 +275,7 @@ class App(http.server.BaseHTTPRequestHandler):
                                        exclude_member=self.self_member, query_title=ti)
             head = f"{no} {ti}".strip()
             parts.append(f"<h2>{html.escape(head)}</h2>"
-                         f"<pre>{html.escape(body[:400])}</pre>{self.render_similar(rows)}")
+                         f"<pre>{html.escape(body[:400])}</pre>{self.render_similar(rows, query=body)}")
         c.close()
         self.send_page("".join(parts))
 

@@ -95,7 +95,7 @@ def db_similar(conn, query_text, idf, default_idf, top_n=10,
 
     # BM25(단어 단위, 희귀어에 강함)를 코사인(char n-gram)에 블렌딩해
     # 상용구 표면형 과대보상을 완화한다. 가중치 0.7/0.3은 골든 진단으로 튜닝됨
-    # (README 진단: Q2 "납입최고" 케이스가 top-5에서 밀려나는 문제 해결).
+    # (작업 리포트/골든셋 진단: Q2 "납입최고" 케이스가 top-5에서 밀려나는 문제 해결).
     BM25_W = 0.3
     out = []
     for r, cos, bm in zip(rows, cos_vals, bms):
