@@ -1,0 +1,14 @@
+[
+  {"key": "life", "name": "생명보험 표준약관", "member_cd": "STD_L",
+   "version_label": "2024.12.20 개정",
+   "source_path": "/Users/nsss/obsidian/nss/05. 지식베이스/보험·금융 개념/표준약관(전문).md",
+   "source_type": "md", "section_start": "□\\s*생명보험", "section_end": "□\\s*손해보험"},
+  {"key": "health", "name": "질병·상해 표준약관", "member_cd": "STD_H",
+   "version_label": "2024.12.20 개정",
+   "source_path": "/Users/nsss/obsidian/nss/05. 지식베이스/보험·금융 개념/표준약관+질병상해보험(전문).md",
+   "source_type": "md"},
+  {"key": "silson", "name": "실손 표준약관(5세대)", "member_cd": "STD_S",
+   "version_label": "5세대",
+   "source_path": "/Users/nsss/obsidian/nss/08. 자원·참고자료/법령자료/별표15_5세대_국내실손_표준약관_발췌_p203-312.pdf",
+   "source_type": "pdf"}
+]
