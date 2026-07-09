@@ -16,6 +16,8 @@ import pathlib
 import sqlite3
 import urllib.parse
 
+import simmatch
+
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>약관 DB 검색</title>
 <style>
@@ -55,6 +57,9 @@ def opts(pairs, sel):
 
 class App(http.server.BaseHTTPRequestHandler):
     db_path = None
+    idf = {}
+    default_idf = 1.0
+    self_member = "L34"   # 자사(미래에셋) — 유사비교에서 제외
 
     def conn(self):
         c = sqlite3.connect(self.db_path)
@@ -88,6 +93,29 @@ class App(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    @staticmethod
+    def render_similar(rows):
+        if not rows:
+            return "<p>유사한 타사 조문이 없음</p>"
+        by = {}
+        for r in rows:
+            by.setdefault(r["insurer"], []).append(r)
+        out = []
+        for insurer, items in by.items():
+            out.append(f"<h3>{html.escape(insurer)}</h3><table>"
+                       "<tr><th>유사도</th><th>상품(판매기간)</th><th>조문</th><th>내용</th></tr>")
+            for r in items:
+                pct = int(round(r["score"] * 100))
+                out.append(
+                    f"<tr><td><b>{pct}%</b></td>"
+                    f"<td><a href='/doc?id={r['doc_id']}'>{html.escape(r['prod_nm_raw'])}</a>"
+                    f"<div class='meta'>{html.escape(r['version_label'] or '')}</div></td>"
+                    f"<td><a href='/clause?id={r['clause_id']}'>{html.escape(r['clause_no'] or '')} "
+                    f"{html.escape(r['title'] or '')}</a></td>"
+                    f"<td class='meta'>{html.escape((r['text'] or '')[:120])}…</td></tr>")
+            out.append("</table>")
+        return "".join(out)
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         raw = urllib.parse.parse_qs(u.query)
@@ -97,10 +125,61 @@ class App(http.server.BaseHTTPRequestHandler):
                 self.view_clause(int(qs["id"]))
             elif u.path == "/doc":
                 self.view_doc(int(qs["id"]))
+            elif u.path == "/similar":
+                self.similar_by_clause(int(qs["id"]))
+            elif u.path == "/similar_text":
+                self.similar_by_text(qs.get("t", ""))
             else:
                 self.search(qs)
         except Exception as e:
             self.send_page(f"<p>오류: {html.escape(str(e))}</p>", qs)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length).decode("utf-8", "replace")
+        qs = {k: v[0] for k, v in urllib.parse.parse_qs(body).items()}
+        u = urllib.parse.urlparse(self.path)
+        try:
+            if u.path == "/similar_text":
+                self.similar_by_text(qs.get("t", ""))
+            else:
+                self.send_page("<p>알 수 없는 요청</p>")
+        except Exception as e:
+            self.send_page(f"<p>오류: {html.escape(str(e))}</p>")
+
+    def similar_by_clause(self, cid):
+        c = self.conn()
+        r = c.execute("SELECT c.text, c.title, d.member_cd FROM clauses c "
+                      "JOIN documents d USING(doc_id) WHERE clause_id=?", (cid,)).fetchone()
+        if not r:
+            c.close(); self.send_page("<p>조문 없음</p>"); return
+        rows = simmatch.db_similar(c, r["text"], self.idf, self.default_idf,
+                                   top_n=15, exclude_member=self.self_member,
+                                   query_title=r["title"])
+        c.close()
+        self.send_page(f"<p class='meta'>이 조문과 닮은 타사 조문</p>{self.render_similar(rows)}")
+
+    def similar_by_text(self, text):
+        text = (text or "").strip()
+        form = ("<form method='post' action='/similar_text'>"
+                "<p class='meta'>초안 조문 텍스트를 붙여넣으세요(여러 조문 가능).</p>"
+                f"<textarea name='t' rows='8' style='width:100%'>{html.escape(text)}</textarea>"
+                "<br><button>유사 타사 조문 찾기</button></form>")
+        if not text:
+            self.send_page(form); return
+        from clause_split import split_clauses
+        c = self.conn()
+        blocks = [(no, ti, body) for no, ti, body in split_clauses(text) if (body or "").strip()]
+        if not blocks:
+            blocks = [(None, "", text)]
+        parts = []
+        for no, ti, body in blocks:
+            head = f"{no or ''} {ti or ''}".strip() or "(붙여넣은 조문)"
+            rows = simmatch.db_similar(c, body, self.idf, self.default_idf, top_n=10,
+                                       exclude_member=self.self_member, query_title=ti)
+            parts.append(f"<h2>{html.escape(head)}</h2>{self.render_similar(rows)}")
+        c.close()
+        self.send_page(form + "".join(parts))
 
     def search(self, qs):
         q = qs.get("q", "").strip()
@@ -160,7 +239,8 @@ class App(http.server.BaseHTTPRequestHandler):
             return
         tag = "특약" if r["is_rider"] else "주계약"
         st = f" · 섹션: {html.escape(r['section_title'])}" if r["section_title"] else ""
-        body = (f"<p><a href='/doc?id={r['doc_id']}'>← 이 약관의 조문 목록</a></p>"
+        body = (f"<p><a href='/doc?id={r['doc_id']}'>← 이 약관의 조문 목록</a> · "
+                f"<a href='/similar?id={r['clause_id']}'>🔍 닮은 타사 조문</a></p>"
                 f"<h2>{html.escape(r['clause_no'] or '')} {html.escape(r['title'] or '')}</h2>"
                 f"<p class='meta'>{html.escape(r['insurer'])} · {html.escape(r['prod_nm_raw'])} · "
                 f"{html.escape(r['version_label'] or '')} · [{tag}]{st}</p><pre>{html.escape(r['text'])}</pre>")
@@ -204,6 +284,14 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     App.db_path = args.db
+    _c = sqlite3.connect(args.db)
+    try:
+        App.idf, App.default_idf = simmatch.load_idf(_c)
+        print(f"유사도 인덱스 로드: n-gram {len(App.idf):,}")
+    except Exception as e:
+        print(f"(유사도 인덱스 없음: {e} — 검색만 가능)")
+    finally:
+        _c.close()
     print(f"약관 DB 검색: http://localhost:{args.port}  (DB: {args.db})")
     http.server.ThreadingHTTPServer(("127.0.0.1", args.port), App).serve_forever()
 
