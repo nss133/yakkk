@@ -39,6 +39,7 @@ PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
  <select name="r">__RIDER__</select>
  <input type="text" id="pn" name="pn" value="__PN__" placeholder="상품명 포함어">
  <button>검색</button>
+ <a href="/" style="margin-left:8px;padding:8px;border:1px solid #ccc;border-radius:4px;color:#555">초기화</a>
 </form>
 __BODY__
 </body></html>"""
