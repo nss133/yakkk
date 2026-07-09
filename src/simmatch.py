@@ -61,7 +61,8 @@ def fts_query(text: str, max_terms: int = 15) -> str:
 
 
 _SQL = """SELECT c.clause_id, c.clause_no, c.title, c.text, d.doc_id, d.member_cd,
-                 d.prod_nm_raw, d.version_label, d.prod_group, i.name AS insurer
+                 d.prod_nm_raw, d.version_label, d.prod_group, i.name AS insurer,
+                 bm25(clauses_fts) AS bm
           FROM clauses_fts f JOIN clauses c ON c.clause_id=f.rowid
           JOIN documents d USING(doc_id) JOIN insurers i ON i.member_cd=d.member_cd
           WHERE clauses_fts MATCH ?"""
@@ -84,9 +85,22 @@ def db_similar(conn, query_text, idf, default_idf, top_n=10,
 
     qv = vectorize(query_text, idf, default_idf)
     qtitle = normalize(query_title) if query_title else ""
+    rows = list(conn.execute(sql, params))
+    if not rows:
+        return []
+
+    cos_vals = [cosine(qv, vectorize(r["text"], idf, default_idf)) for r in rows]
+    bms = [r["bm"] for r in rows]
+    lo, hi = min(bms), max(bms)  # bm25(): 더 음수일수록(작을수록) 매칭 우수
+
+    # BM25(단어 단위, 희귀어에 강함)를 코사인(char n-gram)에 블렌딩해
+    # 상용구 표면형 과대보상을 완화한다. 가중치 0.7/0.3은 골든 진단으로 튜닝됨
+    # (README 진단: Q2 "납입최고" 케이스가 top-5에서 밀려나는 문제 해결).
+    BM25_W = 0.3
     out = []
-    for r in conn.execute(sql, params):
-        score = cosine(qv, vectorize(r["text"], idf, default_idf))
+    for r, cos, bm in zip(rows, cos_vals, bms):
+        bm_norm = (hi - bm) / (hi - lo) if hi > lo else 0.0
+        score = (1 - BM25_W) * cos + BM25_W * bm_norm
         if qtitle and normalize(r["title"] or "") == qtitle:
             score += 0.05           # 조문제목 일치 가산점
         out.append({"score": round(score, 4), **{k: r[k] for k in r.keys()}})
