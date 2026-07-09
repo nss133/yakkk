@@ -42,7 +42,7 @@ def slice_section(text: str, start_pat: str, end_pat):
             ei = i
             break
     if si is None:
-        return text
+        raise ValueError(f"section_start 미매칭: {start_pat}")
     return "\n".join(lines[si:ei] if ei is not None else lines[si:])
 
 

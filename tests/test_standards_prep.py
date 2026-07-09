@@ -1,3 +1,5 @@
+import pytest
+
 import standards_prep as sp
 
 
@@ -28,3 +30,9 @@ def test_slice_section_no_end_takes_to_eof():
     t = "□ 질병상해\n제1조(목적)\n제2조(정의)"
     out = sp.slice_section(t, r"□\s*질병상해", None)
     assert "제2조(정의)" in out
+
+
+def test_slice_section_raises_when_start_missing():
+    t = "머리말\n제1조(목적)\n제2조(정의)"
+    with pytest.raises(ValueError):
+        sp.slice_section(t, r"□\s*존재하지않는마커", None)
