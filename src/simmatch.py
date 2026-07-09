@@ -37,3 +37,58 @@ def cosine(v1: dict, v2: dict) -> float:
     if len(v1) > len(v2):
         v1, v2 = v2, v1
     return sum(w * v2.get(g, 0.0) for g, w in v1.items())
+
+
+def load_idf(conn):
+    """ngram_idf/simindex_meta → (idf dict, default_idf). 앱 시작 시 1회 로드."""
+    idf = {g: v for g, v in conn.execute("SELECT ngram, idf FROM ngram_idf")}
+    meta = dict(conn.execute("SELECT key, value FROM simindex_meta"))
+    default_idf = float(meta.get("default_idf", 1.0))
+    return idf, default_idf
+
+
+def fts_query(text: str, max_terms: int = 15) -> str:
+    """조문에서 변별력 있는 어절 상위 N개를 OR로 결합한 FTS5 질의."""
+    toks = re.findall(r"[가-힣a-z0-9]{2,}", (text or "").lower())
+    seen, terms = set(), []
+    for t in sorted(toks, key=len, reverse=True):
+        if t not in seen:
+            seen.add(t)
+            terms.append(t)
+        if len(terms) >= max_terms:
+            break
+    return " OR ".join(f'"{t}"' for t in terms)
+
+
+_SQL = """SELECT c.clause_id, c.clause_no, c.title, c.text, d.doc_id, d.member_cd,
+                 d.prod_nm_raw, d.version_label, d.prod_group, i.name AS insurer
+          FROM clauses_fts f JOIN clauses c ON c.clause_id=f.rowid
+          JOIN documents d USING(doc_id) JOIN insurers i ON i.member_cd=d.member_cd
+          WHERE clauses_fts MATCH ?"""
+
+
+def db_similar(conn, query_text, idf, default_idf, top_n=10,
+               exclude_member=None, prod_group=None, query_title=None, cand_limit=300):
+    fq = fts_query(query_text)
+    if not fq:
+        return []
+    sql, params = _SQL, [fq]
+    if exclude_member:
+        sql += " AND d.member_cd<>?"
+        params.append(exclude_member)
+    if prod_group:
+        sql += " AND d.prod_group=?"
+        params.append(prod_group)
+    sql += " ORDER BY rank LIMIT ?"
+    params.append(cand_limit)
+
+    qv = vectorize(query_text, idf, default_idf)
+    qtitle = normalize(query_title) if query_title else ""
+    out = []
+    for r in conn.execute(sql, params):
+        score = cosine(qv, vectorize(r["text"], idf, default_idf))
+        if qtitle and normalize(r["title"] or "") == qtitle:
+            score += 0.05           # 조문제목 일치 가산점
+        out.append({"score": round(score, 4), **{k: r[k] for k in r.keys()}})
+    out.sort(key=lambda x: x["score"], reverse=True)
+    return out[:top_n]
