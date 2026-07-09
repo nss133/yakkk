@@ -69,11 +69,14 @@ _SQL = """SELECT c.clause_id, c.clause_no, c.title, c.text, d.doc_id, d.member_c
 
 
 def db_similar(conn, query_text, idf, default_idf, top_n=10,
-               exclude_member=None, prod_group=None, query_title=None, cand_limit=300):
+               exclude_member=None, prod_group=None, query_title=None,
+               cand_limit=300, doc_type="TERMS"):
     fq = fts_query(query_text)
     if not fq:
         return []
     sql, params = _SQL, [fq]
+    sql += " AND d.doc_type=?"
+    params.append(doc_type)
     if exclude_member:
         sql += " AND d.member_cd<>?"
         params.append(exclude_member)
