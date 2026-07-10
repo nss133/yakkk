@@ -96,3 +96,36 @@ def test_golden_standard_life_보험금지급사유():
     assert "지급사유" in (top["title"] or "") or not simmatch.has_negation(top["title"] or ""), (
         f"top-1이 부지급 조문으로 잘못 상위 랭크됨: {top['title']}"
     )
+
+
+# --- REG(감독규정·법령) 매핑 골든 (Task 5) --------------------------------
+# 매핑 품질 게이트 실측(.superpowers/sdd/reg-mapping-eval.md, 6개 주제 2/6 PASS)에서
+# 확인된, 유사도 매핑이 안정적으로 정답을 찾는 2개 주제만 회귀 테스트로 고정한다.
+# 나머지 주제(보험금 지급/청약철회/계약전 알릴의무/배당)는 코퍼스 공백 또는 랭킹
+# 미스로 실패 — 주제사전 보강이 후속 과제(별도 spec).
+
+def test_golden_reg_해약환급금():
+    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
+    idf, d = simmatch.load_idf(c)
+    q = "회사는 계약이 해지된 경우 해약환급금을 계약자에게 지급합니다"
+    reg = simmatch.db_similar(c, q, idf, d, top_n=3, doc_type="REG")
+    c.close()
+    assert reg, "관련 규정 결과가 있어야 함"
+    assert any(r["member_cd"].startswith("REG") for r in reg)
+    # 해약환급금 관련 규정이 top-3에 (제목/본문에 '해약환급금' 포함)
+    assert any("해약환급금" in ((r["title"] or "") + r["text"]) for r in reg)
+
+
+def test_golden_reg_특별계정():
+    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
+    idf, d = simmatch.load_idf(c)
+    q = "회사는 변액보험 자산을 특별계정으로 설정하여 운용합니다"
+    reg = simmatch.db_similar(c, q, idf, d, top_n=3, doc_type="REG")
+    c.close()
+    assert reg, "관련 규정 결과가 있어야 함"
+    assert any(r["member_cd"].startswith("REG") for r in reg)
+    top = reg[0]
+    # top-1이 특별계정 설정·운용 조문이어야 한다(보험업감독규정 제5-6조)
+    assert "특별계정" in (top["title"] or ""), (
+        f"top-1이 특별계정 조문이 아님: {top['title']}"
+    )
