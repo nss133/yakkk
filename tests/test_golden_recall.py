@@ -91,3 +91,8 @@ def test_golden_standard_life_보험금지급사유():
     # 생명보험 표준약관의 보험금 지급사유 조문이 최상위
     assert top["member_cd"].startswith("STD")
     assert "보험금" in (top["title"] or "") or "지급" in (top["title"] or "")
+    # 회귀 방지: 부정어 페널티 적용 후에도 top-1은 부지급 조문이 아니라
+    # 긍정(지급사유) 조문이어야 한다(랭킹정밀도 개선 핵심 목표).
+    assert "지급사유" in (top["title"] or "") or not simmatch.has_negation(top["title"] or ""), (
+        f"top-1이 부지급 조문으로 잘못 상위 랭크됨: {top['title']}"
+    )
