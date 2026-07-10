@@ -172,13 +172,27 @@ class App(http.server.BaseHTTPRequestHandler):
         return "".join(out)
 
     @staticmethod
-    def render_two_sections(std_rows, terms_rows, query=""):
-        std_html = (App.render_similar(std_rows, query) if std_rows
-                    else "<p>표준약관 대응 조문 없음</p>")
-        terms_html = (App.render_similar(terms_rows, query) if terms_rows
-                      else "<p>타사 유사 조문 없음</p>")
-        return (f"<h2>📋 표준약관 대응 조문</h2>{std_html}"
-                f"<hr><h2>🏢 타사 유사 조문</h2>{terms_html}")
+    def render_sections(sections, query=""):
+        parts = []
+        for label, rows, empty in sections:
+            body = App.render_similar(rows, query) if rows else f"<p>{empty}</p>"
+            parts.append(f"<h2>{label}</h2>{body}")
+        return "<hr>".join(parts)
+
+    def _similar_blocks(self, c, query, query_title=None):
+        """표준약관·감독규정·타사 3섹션 rows를 한 번에 조회."""
+        std = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=3,
+                                  query_title=query_title, doc_type="STANDARD")
+        reg = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=3,
+                                  query_title=query_title, doc_type="REG")
+        terms = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=10,
+                                    exclude_member=self.self_member,
+                                    query_title=query_title, doc_type="TERMS")
+        return self.render_sections([
+            ("📋 표준약관 대응 조문", std, "표준약관 대응 조문 없음"),
+            ("📖 관련 감독규정·법령", reg, "관련 감독규정·법령 없음"),
+            ("🏢 타사 유사 조문", terms, "타사 유사 조문 없음"),
+        ], query)
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
@@ -224,14 +238,9 @@ class App(http.server.BaseHTTPRequestHandler):
                       "JOIN documents d USING(doc_id) WHERE clause_id=?", (cid,)).fetchone()
         if not r:
             c.close(); self.send_page("<p>조문 없음</p>"); return
-        std = simmatch.db_similar(c, r["text"], self.idf, self.default_idf,
-                                  top_n=3, query_title=r["title"], doc_type="STANDARD")
-        terms = simmatch.db_similar(c, r["text"], self.idf, self.default_idf,
-                                    top_n=15, exclude_member=self.self_member,
-                                    query_title=r["title"], doc_type="TERMS")
+        html_body = self._similar_blocks(c, r["text"], r["title"])
         c.close()
-        self.send_page(f"<p class='meta'>이 조문의 표준약관 대응 + 닮은 타사 조문</p>"
-                       f"{self.render_two_sections(std, terms, r['text'])}")
+        self.send_page(f"<p class='meta'>이 조문의 표준약관·감독규정·타사 대응 조문</p>{html_body}")
 
     def similar_by_text(self, text):
         text = (text or "").strip()
@@ -249,12 +258,7 @@ class App(http.server.BaseHTTPRequestHandler):
         parts = []
         for no, ti, body in blocks:
             head = f"{no or ''} {ti or ''}".strip() or "(붙여넣은 조문)"
-            std = simmatch.db_similar(c, body, self.idf, self.default_idf, top_n=3,
-                                      query_title=ti, doc_type="STANDARD")
-            terms = simmatch.db_similar(c, body, self.idf, self.default_idf, top_n=10,
-                                        exclude_member=self.self_member, query_title=ti,
-                                        doc_type="TERMS")
-            parts.append(f"<h2>{html.escape(head)}</h2>{self.render_two_sections(std, terms, body)}")
+            parts.append(f"<h2>{html.escape(head)}</h2>{self._similar_blocks(c, body)}")
         c.close()
         self.send_page(form + "".join(parts))
 
@@ -286,14 +290,9 @@ class App(http.server.BaseHTTPRequestHandler):
         c = self.conn()
         parts = [f"<p class='meta'>초안 조문 {len(blocks)}건 심사</p>"]
         for no, ti, body in blocks:
-            std = simmatch.db_similar(c, body, self.idf, self.default_idf, top_n=3,
-                                      query_title=ti, doc_type="STANDARD")
-            terms = simmatch.db_similar(c, body, self.idf, self.default_idf, top_n=5,
-                                        exclude_member=self.self_member, query_title=ti,
-                                        doc_type="TERMS")
             head = f"{no} {ti}".strip()
             parts.append(f"<h2>{html.escape(head)}</h2>"
-                         f"<pre>{html.escape(body[:400])}</pre>{self.render_two_sections(std, terms, body)}")
+                         f"<pre>{html.escape(body[:400])}</pre>{self._similar_blocks(c, body)}")
         c.close()
         self.send_page("".join(parts))
 
