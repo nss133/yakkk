@@ -11,7 +11,7 @@
 """
 import re
 
-RE_JO = re.compile(r"^\s*(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*(.*)$")
+RE_JO = re.compile(r"^\s*(제\s*\d+(?:\s*-\s*\d+)?\s*조(?:\s*의\s*\d+)?)\s*(.*)$")
 RE_BYULPYO = re.compile(r"^\s*[\[(【]?\s*(별\s*표\s*\d*)\s*[\])】]?\s*(.{0,60})$")
 RE_PAGE = re.compile(r"^\s*(?:P\.?\s*)?\d{1,4}\s*$")            # 페이지번호/숫자만 행
 RE_MARKER = re.compile(r"^\s*[①-⓿❶-❿]+\s*$")  # 원문자 마커 행
