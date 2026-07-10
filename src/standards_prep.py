@@ -60,5 +60,6 @@ def to_plaintext(entry: dict) -> str:
     return raw
 
 
-def load_manifest():
-    return json.loads(MANIFEST.read_text(encoding="utf-8"))
+def load_manifest(path=None):
+    p = pathlib.Path(path) if path else MANIFEST
+    return json.loads(p.read_text(encoding="utf-8"))

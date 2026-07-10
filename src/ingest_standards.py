@@ -40,10 +40,11 @@ def _clean_standard_chunks(chunks):
 
 def ingest(conn, entry: dict, plaintext: str) -> int:
     mcd, name = entry["member_cd"], entry["name"]
+    dt = entry.get("doc_type", "STANDARD")
     conn.execute("INSERT OR REPLACE INTO insurers(member_cd, name) VALUES(?,?)", (mcd, name))
-    # 발행처의 기존 STANDARD 문서·조문 제거(멱등)
+    # 발행처의 기존 동일 doc_type 문서·조문 제거(멱등)
     old = [r[0] for r in conn.execute(
-        "SELECT doc_id FROM documents WHERE member_cd=? AND doc_type='STANDARD'", (mcd,))]
+        "SELECT doc_id FROM documents WHERE member_cd=? AND doc_type=?", (mcd, dt))]
     if old:
         conn.executemany("DELETE FROM clauses WHERE doc_id=?", [(x,) for x in old])
         conn.executemany("DELETE FROM documents WHERE doc_id=?", [(x,) for x in old])
@@ -56,7 +57,7 @@ def ingest(conn, entry: dict, plaintext: str) -> int:
     candidates = {
         "member_cd": mcd,
         "prod_nm_raw": name,
-        "doc_type": "STANDARD",
+        "doc_type": dt,
         "version_label": entry["version_label"],
         "file_path": entry["source_path"],
         "sha256": sha,
