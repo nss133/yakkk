@@ -24,7 +24,8 @@ def _fixture():
         (20,2,'제3조','보험금의 지급','피보험자가 사망한 때에 회사는 사망보험금을 지급함 지급사유 명시'),
         (30,3,'제9조','보험료 납입','보험료의 납입을 연체하면 납입최고 후 계약이 해지됩니다'),
         (40,4,'제12조','배당금의 지급','회사는 계약이 유지되는 동안 매년 배당금을 계산하여 계약자에게 지급합니다 배당금 지급 기준'),
-        (50,5,'제3조','보험금의 지급사유','회사는 피보험자가 보험기간 중에 사망한 경우 사망보험금을 수익자에게 지급합니다');
+        (50,5,'제3조','보험금의 지급사유','회사는 피보험자가 보험기간 중에 사망한 경우 사망보험금을 수익자에게 지급합니다'),
+        (51,5,'제5조','보험금을 지급하지 않는 사유','회사는 다음의 경우에는 보험금을 지급하지 않습니다 피보험자가 고의로 자신을 해친 경우 사망보험금 부지급 사유');
       CREATE VIRTUAL TABLE clauses_fts USING fts5(text, title, content='clauses', content_rowid='clause_id');
       INSERT INTO clauses_fts(rowid,text,title)
         SELECT clause_id,text,COALESCE(title,'') FROM clauses WHERE length(text)>=30;
@@ -64,3 +65,22 @@ def test_db_similar_doc_type_standard_only():
     assert std and all(r["member_cd"] == "STD_L" for r in std)
     terms = simmatch.db_similar(c, q, idf, d, top_n=5, doc_type="TERMS", exclude_member="L34")
     assert terms and all(r["member_cd"] != "STD_L" for r in terms)
+
+
+def test_negation_penalty_demotes_bujigeup():
+    c = _fixture()   # 위 두 조문(긍정/부정) 포함하도록 확장됨
+    idf, d = simmatch.load_idf(c)
+    q = "피보험자가 사망한 경우 회사는 보험금을 지급합니다"
+    res = simmatch.db_similar(c, q, idf, d, top_n=5, doc_type="STANDARD")
+    titles = [r["title"] for r in res]
+    # 지급사유가 부지급보다 앞
+    assert titles.index("보험금의 지급사유") < titles.index("보험금을 지급하지 않는 사유")
+
+
+def test_negation_symmetric_when_query_negated():
+    c = _fixture()
+    idf, d = simmatch.load_idf(c)
+    q = "회사가 보험금을 지급하지 않는 사유가 궁금합니다"   # 질의도 부정
+    res = simmatch.db_similar(c, q, idf, d, top_n=5, doc_type="STANDARD")
+    # 부지급 질의엔 부지급 조문이 정상적으로 상위(페널티 대칭)
+    assert res[0]["title"] == "보험금을 지급하지 않는 사유"

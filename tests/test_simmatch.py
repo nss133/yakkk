@@ -29,3 +29,10 @@ def test_cosine_similar_higher_than_dissimilar():
 def test_idf_weights_rare_grams_more():
     q = simmatch.vectorize("가나다라", {"가나다": 5.0, "나다라": 1.0}, default_idf=1.0)
     assert q["가나다"] > q["나다라"]
+
+
+def test_has_negation_detects_markers():
+    assert simmatch.has_negation("보험금을 지급하지 않는 사유")
+    assert simmatch.has_negation("보험금을 지급하지 아니하는 경우")
+    assert not simmatch.has_negation("보험금의 지급사유")
+    assert not simmatch.has_negation("청약의 철회")

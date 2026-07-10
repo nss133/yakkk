@@ -39,6 +39,16 @@ def cosine(v1: dict, v2: dict) -> float:
     return sum(w * v2.get(g, 0.0) for g, w in v1.items())
 
 
+# 부정/부지급 조문 제목 마커(공백 제거 후 부분일치). '제외'는 오탐 우려로 제외.
+_NEG_MARKERS = ("지급하지않", "지급하지아니", "하지아니", "하지않", "않는", "않습니다", "못하", "부지급")
+
+
+def has_negation(text: str) -> bool:
+    """제목 등 짧은 문자열에 부정/부지급 마커가 있는지(공백 무시)."""
+    s = re.sub(r"\s+", "", text or "")
+    return any(m in s for m in _NEG_MARKERS)
+
+
 def load_idf(conn):
     """ngram_idf/simindex_meta → (idf dict, default_idf). 앱 시작 시 1회 로드."""
     idf = {g: v for g, v in conn.execute("SELECT ngram, idf FROM ngram_idf")}
@@ -100,12 +110,20 @@ def db_similar(conn, query_text, idf, default_idf, top_n=10,
     # 상용구 표면형 과대보상을 완화한다. 가중치 0.7/0.3은 골든 진단으로 튜닝됨
     # (작업 리포트/골든셋 진단: Q2 "납입최고" 케이스가 top-5에서 밀려나는 문제 해결).
     BM25_W = 0.3
+    TITLE_W = 0.35   # 제목 코사인 가중(조사 무관 변별어 반영)
+    NEG_W = 0.30     # 부정어 비대칭 페널티
+    q_neg = has_negation(query_text)
     out = []
     for r, cos, bm in zip(rows, cos_vals, bms):
         bm_norm = (hi - bm) / (hi - lo) if hi > lo else 0.0
         score = (1 - BM25_W) * cos + BM25_W * bm_norm
+        # 제목 코사인 가중: 질의와 후보 제목의 주제 적합도
+        score += TITLE_W * cosine(qv, vectorize(r["title"] or "", idf, default_idf))
+        # 부정어 페널티: 후보 제목이 부정/부지급인데 질의는 아니면 감점(대칭)
+        if has_negation(r["title"] or "") and not q_neg:
+            score -= NEG_W
         if qtitle and normalize(r["title"] or "") == qtitle:
-            score += 0.05           # 조문제목 일치 가산점
+            score += 0.05           # 조문제목 일치 가산점(기존)
         out.append({"score": round(score, 4), **{k: r[k] for k in r.keys()}})
     out.sort(key=lambda x: x["score"], reverse=True)
     return out[:top_n]
