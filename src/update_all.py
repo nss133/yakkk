@@ -58,6 +58,7 @@ def main():
 
     ok &= run("4. 텍스트 추출", ["extract_index.py"], "extract")
     ok &= run("4a. 표준약관 적재", ["ingest_standards.py"], "standards")
+    ok &= run("4a2. 규정 적재", ["ingest_regulations.py"], "regulations")
     ok &= run("4b. 유사인덱스", ["build_simindex.py"], "simindex")
     ok &= run("5. 매칭 재구축", ["build_matches.py"], "matches")
     ok &= run("5b. 섹션 태깅", ["enrich_sections.py"], "enrich")
