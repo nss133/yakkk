@@ -1,0 +1,18 @@
+[
+  {"key": "gamdok", "name": "보험업감독규정", "member_cd": "REG_GD",
+   "version_label": "2024.8.7 시행",
+   "source_path": "/Users/nsss/obsidian/nss/08. 자원·참고자료/법령자료/법령(전문)/보험업감독규정(전문).md",
+   "source_type": "md", "doc_type": "REG"},
+  {"key": "law", "name": "보험업법", "member_cd": "REG_LAW",
+   "version_label": "전문",
+   "source_path": "/Users/nsss/obsidian/nss/08. 자원·참고자료/법령자료/법령(전문)/보험업법(전문).md",
+   "source_type": "md", "doc_type": "REG"},
+  {"key": "law_e", "name": "보험업법 시행령", "member_cd": "REG_LAWE",
+   "version_label": "전문",
+   "source_path": "/Users/nsss/obsidian/nss/08. 자원·참고자료/법령자료/법령(전문)/보험업법 시행령(전문).md",
+   "source_type": "md", "doc_type": "REG"},
+  {"key": "law_r", "name": "보험업법 시행규칙", "member_cd": "REG_LAWR",
+   "version_label": "250218 시행",
+   "source_path": "/Users/nsss/obsidian/nss/08. 자원·참고자료/법령자료/법령(전문)/보험업법 시행규칙(전문) 250218 시행.md",
+   "source_type": "md", "doc_type": "REG"}
+]
