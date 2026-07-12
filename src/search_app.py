@@ -40,6 +40,7 @@ PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <form method="get" action="/">
  <input type="text" id="q" name="q" value="__Q__" placeholder="검색어 (공백=AND, &quot;구문&quot;, 접두어*)">
  <select name="scope">__SCOPE__</select>
+ <select name="dt">__DOCTYPE__</select>
  <select name="m"><option value="">전체 회사</option>__MEMBERS__</select>
  <select name="g"><option value="">전체 상품군</option>__GROUPS__</select>
  <select name="r">__RIDER__</select>
@@ -52,6 +53,8 @@ __BODY__
 
 SCOPE_OPTS = [("", "본문+제목"), ("title", "제목(조문명)만")]
 RIDER_OPTS = [("", "주계약+특약"), ("main", "주계약만"), ("rider", "특약만")]
+# 검색 대상 코퍼스: 기본은 타사 약관(TERMS)만. 규범은 선택 시에만.
+DOCTYPE_OPTS = [("TERMS", "타사 약관"), ("STANDARD", "표준약관"), ("REG", "감독규정·법령"), ("", "전체")]
 
 
 def opts(pairs, sel):
@@ -136,6 +139,7 @@ class App(http.server.BaseHTTPRequestHandler):
                .replace("__NDOCS__", f"{nd:,}").replace("__NCLS__", f"{nc:,}")
                .replace("__MEMBERS__", members).replace("__GROUPS__", groups)
                .replace("__SCOPE__", opts(SCOPE_OPTS, qs.get("scope", "")))
+               .replace("__DOCTYPE__", opts(DOCTYPE_OPTS, qs.get("dt", "TERMS")))
                .replace("__RIDER__", opts(RIDER_OPTS, qs.get("r", "")))
                .replace("__Q__", html.escape(qs.get("q", "")))
                .replace("__PN__", html.escape(qs.get("pn", "")))
@@ -310,6 +314,9 @@ class App(http.server.BaseHTTPRequestHandler):
                  JOIN documents d USING(doc_id) JOIN insurers i ON i.member_cd = d.member_cd
                  WHERE clauses_fts MATCH ?"""
         params = [match]
+        dt = qs.get("dt", "TERMS")   # 기본: 타사 약관만. 빈값이면 전체(규범 포함)
+        if dt:
+            sql += " AND d.doc_type = ?"; params.append(dt)
         if qs.get("m"):
             sql += " AND d.member_cd = ?"; params.append(qs["m"])
         if qs.get("g"):
