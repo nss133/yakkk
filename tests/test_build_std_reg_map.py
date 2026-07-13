@@ -67,3 +67,22 @@ def test_unresolved_golden_key_exits():
     c = _db()
     with pytest.raises(SystemExit):
         bm.build(c, {}, 1.0, golden=[{"std": "STD_L 제999조", "none": "x"}])
+
+
+def test_ensure_fts_creates_and_populates():
+    c = _db()
+    c.execute("UPDATE clauses SET text = text || '" + "가" * 30 + "'")  # 30자 이상으로
+    bm.ensure_fts(c)
+    n = c.execute("SELECT COUNT(*) FROM clauses_fts").fetchone()[0]
+    assert n == c.execute("SELECT COUNT(*) FROM clauses WHERE length(text) >= 30").fetchone()[0]
+
+
+def test_ensure_fts_rebuilds_when_stale():
+    c = _db()
+    c.execute("UPDATE clauses SET text = text || '" + "가" * 30 + "'")
+    bm.ensure_fts(c)
+    before = c.execute("SELECT COUNT(*) FROM clauses_fts").fetchone()[0]
+    c.execute("INSERT INTO clauses VALUES(30,1,2,'제99조','신규조문','" + "나" * 40 + "')")
+    bm.ensure_fts(c)  # 조문 수 변화 감지 → 재구축
+    after = c.execute("SELECT COUNT(*) FROM clauses_fts").fetchone()[0]
+    assert after == before + 1
