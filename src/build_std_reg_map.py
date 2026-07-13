@@ -6,6 +6,7 @@
     {"std": "STD_L 제34조", "reg": ["REG_GD 제6-14조"]}      # 정답 강제(검수됨)
     {"std": "STD_L 제13조", "none": "상법 제651조 ... 소관"}  # 대응 없음 선언
   키는 "member_cd clause_no" — clause_id는 재적재마다 변하므로 골든에 쓰지 않음.
+  조문번호가 파싱 부산물로 중복되는 경우 선택적 "title" 필드로 좁힘(예: STD_S 제42조).
 - 멱등(전체 삭제 후 재삽입). 미해석 골든 키는 exit 1(조문번호 개정 감지 게이트).
 사용법: .venv/bin/python src/build_std_reg_map.py
 """
@@ -64,12 +65,19 @@ def ensure_fts(conn):
     conn.commit()
 
 
-def resolve_clause(conn, key: str) -> int:
-    """'STD_L 제34조' → clause_id. 0건/복수건이면 SystemExit(골든 무결성 게이트)."""
+def resolve_clause(conn, key: str, title: str | None = None) -> int:
+    """'STD_L 제34조' → clause_id. 0건/복수건이면 SystemExit(골든 무결성 게이트).
+
+    동일 조문번호가 파싱 부산물(표 조각 등)로 중복 존재하는 문서(예: STD_S 제42조)는
+    골든 엔트리의 선택적 "title" 필드로 좁힌다 — 좁힌 뒤에도 1건이 아니면 동일하게 실패."""
     member, no = key.split(None, 1)
-    rows = conn.execute(
-        "SELECT clause_id FROM clauses c JOIN documents d USING(doc_id) "
-        "WHERE d.member_cd=? AND c.clause_no=?", (member, no)).fetchall()
+    sql = ("SELECT clause_id FROM clauses c JOIN documents d USING(doc_id) "
+           "WHERE d.member_cd=? AND c.clause_no=?")
+    params = [member, no]
+    if title:
+        sql += " AND c.title=?"
+        params.append(title)
+    rows = conn.execute(sql, params).fetchall()
     if len(rows) != 1:
         raise SystemExit(f"골든 키 해석 실패: {key!r} — {len(rows)}건 매칭(조문번호 개정 여부 확인)")
     return rows[0][0]
@@ -78,7 +86,7 @@ def resolve_clause(conn, key: str) -> int:
 def build(conn, idf, default_idf, golden):
     conn.execute(SCHEMA)
     conn.execute("DELETE FROM std_reg_map")
-    overrides = {resolve_clause(conn, e["std"]): e for e in golden}
+    overrides = {resolve_clause(conn, e["std"], e.get("title")): e for e in golden}
     stds = conn.execute(
         "SELECT c.clause_id, c.clause_no, c.title, c.text FROM clauses c "
         "JOIN documents d USING(doc_id) WHERE d.doc_type='STANDARD' ORDER BY c.clause_id"

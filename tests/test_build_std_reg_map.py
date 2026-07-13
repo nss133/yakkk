@@ -69,6 +69,20 @@ def test_unresolved_golden_key_exits():
         bm.build(c, {}, 1.0, golden=[{"std": "STD_L 제999조", "none": "x"}])
 
 
+def test_duplicate_clause_no_disambiguated_by_title(monkeypatch):
+    # STD_S 실측 사례: 표 파싱 부산물로 동일 clause_no가 중복 존재 →
+    # title 없이 실패(무결성 게이트 유지), title 지정 시 정확히 1건으로 해석.
+    c = _db()
+    c.execute("INSERT INTO clauses VALUES(12,1,2,'제34조','제1항제4호에','표 조각 부산물')")
+    monkeypatch.setattr(bm.simmatch, "db_similar", lambda *a, **k: [])
+    with pytest.raises(SystemExit):
+        bm.build(c, {}, 1.0, golden=[{"std": "STD_L 제34조", "none": "x"}])
+    bm.build(c, {}, 1.0, golden=[
+        {"std": "STD_L 제34조", "title": "배당금의 지급", "none": "대응 없음 사유"}])
+    n = c.execute("SELECT * FROM std_reg_map WHERE source='none'").fetchall()
+    assert len(n) == 1 and n[0]["std_clause_id"] == 10
+
+
 def test_ensure_fts_creates_and_populates():
     c = _db()
     c.execute("UPDATE clauses SET text = text || ' zzzpad" + "가" * 30 + "'")
