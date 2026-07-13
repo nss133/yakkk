@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """폐쇄망용 약관 검색 웹앱 — Python 표준 라이브러리만 사용(단일 파일).
 
-terms_dist*.db 하나와 이 파일만 반입하면 동작:
+terms_dist*.db + simmatch.py + diff_render.py와 이 파일을 반입하면 동작:
     python3 search_app.py --db terms_dist_current.db --port 8765
 
 기능:
@@ -18,6 +18,7 @@ import sqlite3
 import urllib.parse
 
 import simmatch
+import diff_render
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB — docx 초안은 소용량, 넉넉히 상한선만 방어
 
@@ -33,6 +34,9 @@ PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
  .tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:#eef;color:#336}
  .tag.rider{background:#fee;color:#933}
  pre{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:14px;font-size:13px;line-height:1.6}
+ ins{background:#d7f5d7;text-decoration:none} del{background:#fdd;color:#933}
+ .diff{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:14px;font-size:13px;line-height:1.8}
+ details{margin:8px 0;border:1px solid #eee;padding:6px 10px} summary{cursor:pointer}
  a{color:#0a58ca;text-decoration:none} form{line-height:2.2}
 </style></head><body>
 <h1>약관 DB 검색 <span class="meta">__DBNAME__ · 문서 __NDOCS__건 · 조문 __NCLS__건</span></h1>
@@ -117,6 +121,7 @@ class App(http.server.BaseHTTPRequestHandler):
     idf = {}
     default_idf = 1.0
     self_member = "L34"   # 자사(미래에셋) — 유사비교에서 제외
+    DIFF_MIN_SCORE = 0.25  # 미만이면 diff 대신 미리보기(오판 유도 방지)
 
     def conn(self):
         c = sqlite3.connect(self.db_path)
@@ -183,8 +188,37 @@ class App(http.server.BaseHTTPRequestHandler):
             parts.append(f"<h2>{label}</h2>{body}")
         return "<hr>".join(parts)
 
+    @staticmethod
+    def render_standard_diff(rows, draft_text):
+        """표준약관 섹션: 매치별 <details> 인라인 diff. 1위만 펼침,
+        저유사도(<DIFF_MIN_SCORE)·빈 본문·초장문은 미리보기 폴백."""
+        if not rows:
+            return "<p>표준약관 대응 조문 없음</p>"
+        out = []
+        for i, r in enumerate(rows):
+            pct = int(round(r["score"] * 100))
+            head = (f"<b>{pct}%</b> <a href='/doc?id={r['doc_id']}'>{html.escape(r['prod_nm_raw'])}</a>"
+                    f" <span class='meta'>{html.escape(r['version_label'] or '')}</span> · "
+                    f"<a href='/clause?id={r['clause_id']}'>{html.escape(r['clause_no'] or '')} "
+                    f"{html.escape(r['title'] or '')}</a>")
+            dh = (diff_render.diff_html(draft_text, r["text"])
+                  if r["score"] >= App.DIFF_MIN_SCORE else "")
+            if dh:
+                s = diff_render.diff_stats(draft_text, r["text"])
+                head += (f" <span class='meta'>일치 {int(round(s['equal_ratio'] * 100))}% · "
+                         f"초안 추가 {s['n_ins']}곳 · 표준약관 누락 {s['n_del']}곳</span>")
+                body = f"<div class='diff'>{dh}</div>"
+            else:
+                reason = ("유사도가 낮아 차이 표시 생략(대응 조문이 아닐 수 있음)"
+                          if r["score"] < App.DIFF_MIN_SCORE
+                          else "본문 또는 초안이 비어 있거나 길어 차이 표시 생략")
+                body = (f"<p class='meta'>{reason}</p>"
+                        f"<p class='meta'>{html.escape((r['text'] or '')[:120])}…</p>")
+            out.append(f"<details{' open' if i == 0 else ''}><summary>{head}</summary>{body}</details>")
+        return "".join(out)
+
     def _similar_blocks(self, c, query, query_title=None):
-        """표준약관·감독규정·타사 3섹션 rows를 한 번에 조회."""
+        """표준약관(diff)·감독규정·타사 3섹션을 한 번에 조회·렌더."""
         std = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=3,
                                   query_title=query_title, doc_type="STANDARD")
         reg = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=3,
@@ -192,11 +226,12 @@ class App(http.server.BaseHTTPRequestHandler):
         terms = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=10,
                                     exclude_member=self.self_member,
                                     query_title=query_title, doc_type="TERMS")
-        return self.render_sections([
-            ("📋 표준약관 대응 조문", std, "표준약관 대응 조문 없음"),
+        std_html = f"<h2>📋 표준약관 대응 조문</h2>{self.render_standard_diff(std, query)}"
+        rest = self.render_sections([
             ("📖 관련 감독규정·법령", reg, "관련 감독규정·법령 없음"),
             ("🏢 타사 유사 조문", terms, "타사 유사 조문 없음"),
         ], query)
+        return f"{std_html}<hr>{rest}"
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
