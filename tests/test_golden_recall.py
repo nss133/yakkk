@@ -129,3 +129,42 @@ def test_golden_reg_특별계정():
     assert "특별계정" in (top["title"] or ""), (
         f"top-1이 특별계정 조문이 아님: {top['title']}"
     )
+
+
+# --- 표준약관 브릿지 골든 (배당=정답 강제, 알릴의무=대응없음 선언) ------------
+
+def _has_bridge(c):
+    return c.execute("SELECT name FROM sqlite_master WHERE name='std_reg_map'").fetchone() is not None
+
+
+def test_golden_bridge_배당_제6_14조():
+    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
+    if not _has_bridge(c):
+        c.close(); pytest.skip("std_reg_map 없음(반입 DB 재생성 전)")
+    idf, d = simmatch.load_idf(c)
+    q = "회사는 유배당보험의 계약자에게 배당금을 지급합니다"
+    std = simmatch.db_similar(c, q, idf, d, top_n=1, doc_type="STANDARD")
+    assert std and "배당" in (std[0]["title"] or ""), f"top-1이 배당 조문이 아님: {std}"
+    rows = c.execute(
+        "SELECT cl.clause_no FROM std_reg_map m JOIN clauses cl ON cl.clause_id=m.reg_clause_id "
+        "WHERE m.std_clause_id=?", (std[0]["clause_id"],)).fetchall()
+    c.close()
+    # 직접 유사도에서 밀리던(reg-mapping-eval 배당 FAIL) 정답이 브릿지로 확보됨
+    assert any(r["clause_no"] == "제6-14조" for r in rows), \
+        f"배당 브릿지가 제6-14조를 가리켜야 함: {[r['clause_no'] for r in rows]}"
+
+
+def test_golden_bridge_알릴의무_대응없음():
+    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
+    if not _has_bridge(c):
+        c.close(); pytest.skip("std_reg_map 없음(반입 DB 재생성 전)")
+    idf, d = simmatch.load_idf(c)
+    q = "계약자는 청약 시 청약서에서 질문한 사항에 대해 사실대로 알려야 합니다"
+    std = simmatch.db_similar(c, q, idf, d, top_n=1, doc_type="STANDARD")
+    assert std
+    row = c.execute("SELECT note FROM std_reg_map WHERE std_clause_id=? AND source='none'",
+                    (std[0]["clause_id"],)).fetchone()
+    c.close()
+    # 코퍼스 공백 주제는 오매핑 노출 대신 '대응 없음' 선언이어야 한다
+    assert row is not None, "알릴의무 표준약관 조문은 '대응 없음' 골든이어야 함"
+    assert "상법" in row["note"]

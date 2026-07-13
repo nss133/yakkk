@@ -11,6 +11,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "db" / "terms.db"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
+FTS_MIN_CHARS = 30
+FTS_DDL = ("CREATE VIRTUAL TABLE clauses_fts USING fts5("
+           "text, title, content='clauses', content_rowid='clause_id')")
+
 
 def safe_name(s: str) -> str:
     return re.sub(r'[\\/:*?"<>|\s]+', "_", s).strip("_")[:120]
