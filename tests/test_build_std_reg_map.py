@@ -71,18 +71,17 @@ def test_unresolved_golden_key_exits():
 
 def test_ensure_fts_creates_and_populates():
     c = _db()
-    c.execute("UPDATE clauses SET text = text || '" + "가" * 30 + "'")  # 30자 이상으로
+    c.execute("UPDATE clauses SET text = text || ' zzzpad" + "가" * 30 + "'")
     bm.ensure_fts(c)
-    n = c.execute("SELECT COUNT(*) FROM clauses_fts").fetchone()[0]
-    assert n == c.execute("SELECT COUNT(*) FROM clauses WHERE length(text) >= 30").fetchone()[0]
+    assert c.execute("SELECT COUNT(*) FROM clauses_fts WHERE clauses_fts MATCH 'zzzpad*'").fetchone()[0] > 0
 
 
 def test_ensure_fts_rebuilds_when_stale():
     c = _db()
     c.execute("UPDATE clauses SET text = text || '" + "가" * 30 + "'")
     bm.ensure_fts(c)
-    before = c.execute("SELECT COUNT(*) FROM clauses_fts").fetchone()[0]
-    c.execute("INSERT INTO clauses VALUES(30,1,2,'제99조','신규조문','" + "나" * 40 + "')")
-    bm.ensure_fts(c)  # 조문 수 변화 감지 → 재구축
-    after = c.execute("SELECT COUNT(*) FROM clauses_fts").fetchone()[0]
-    assert after == before + 1
+    c.execute("INSERT INTO clauses VALUES(30,1,2,'제99조','신규조문','zzznewtoken77 " + "나" * 30 + "')")
+    # 재인덱싱 전엔 MATCH가 신규 조문을 못 찾음(스테일 상태 문서화)
+    assert c.execute("SELECT COUNT(*) FROM clauses_fts WHERE clauses_fts MATCH 'zzznewtoken77'").fetchone()[0] == 0
+    bm.ensure_fts(c)  # 스테일 감지 → 전체 재구축
+    assert c.execute("SELECT COUNT(*) FROM clauses_fts WHERE clauses_fts MATCH 'zzznewtoken77'").fetchone()[0] == 1

@@ -37,19 +37,21 @@ def ensure_fts(conn):
     이 함수는 db/terms.db 안에 clauses 전문의 FTS 섀도(약 +30% 용량)를 만들며,
     조문 수가 바뀌면(월 갱신) 전체 재구축한다.
 
-    clauses_fts는 content='clauses' 외부 콘텐츠 테이블이라 COUNT(*)는 clauses 신규
-    행이 늘어난 것처럼 보이지만, MATCH 대상 섀도 인덱스는 갱신되지 않아 신규 조문이
-    검색에서 누락된다(조용히 스테일). 그래서 존재 여부가 아니라 clauses(길이 30자 이상)
-    행수와 clauses_fts 행수를 비교해 불일치 시 DROP 후 재생성한다."""
-    n_clauses = conn.execute(
+    clauses_fts는 content='clauses' 외부 콘텐츠 테이블이라 COUNT(*) FROM clauses_fts는
+    clauses 신규 행이 늘어난 만큼 그대로 따라 움직인다(항등식 — content 테이블의 rowid
+    집합을 반영할 뿐 섀도 인덱스가 실제로 그 문서를 색인했는지는 말해주지 않는다).
+    그래서 존재 여부·COUNT(*) 비교가 아니라, 실제로 색인된 문서 수를 세는 섀도 테이블
+    clauses_fts_docsize(문서당 1행 — DDL에 columnsize=0을 주지 않아 생성됨)의 행수와
+    clauses(길이 30자 이상) 행수를 비교해 불일치 시 DROP 후 재생성한다."""
+    expected = conn.execute(
         "SELECT COUNT(*) FROM clauses WHERE length(text) >= 30").fetchone()[0]
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='clauses_fts'").fetchone()
-    if row:
-        n_fts = conn.execute("SELECT COUNT(*) FROM clauses_fts").fetchone()[0]
-        if n_fts == n_clauses:
-            return
-        conn.execute("DROP TABLE clauses_fts")
+    try:
+        indexed = conn.execute("SELECT COUNT(*) FROM clauses_fts_docsize").fetchone()[0]
+    except sqlite3.OperationalError:
+        indexed = -1  # FTS 자체가 없음
+    if indexed == expected:
+        return
+    conn.execute("DROP TABLE IF EXISTS clauses_fts")
     conn.executescript("""
         CREATE VIRTUAL TABLE clauses_fts USING fts5(
             text, title, content='clauses', content_rowid='clause_id'
