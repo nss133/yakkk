@@ -29,6 +29,27 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS std_reg_map(
 )"""
 
 
+def ensure_fts(conn):
+    """terms.db(작업 원본)에는 clauses_fts가 없음(export_dist.py에서만 생성).
+    db_similar()가 FTS MATCH·BM25를 요구하므로, 빌드 시점에 여기서 1회 만들어 둔다
+    (export_dist.py와 동일 DDL 재사용 — 반입 DB와 동일한 검색 후보/스코어 보장).
+    이미 있으면 스킵(멱등)."""
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='clauses_fts'").fetchone()
+    if row:
+        return
+    conn.executescript("""
+        CREATE VIRTUAL TABLE clauses_fts USING fts5(
+            text, title, content='clauses', content_rowid='clause_id'
+        );
+    """)
+    conn.execute("""
+        INSERT INTO clauses_fts(rowid, text, title)
+        SELECT clause_id, text, COALESCE(title,'') FROM clauses WHERE length(text) >= 30
+    """)
+    conn.commit()
+
+
 def resolve_clause(conn, key: str) -> int:
     """'STD_L 제34조' → clause_id. 0건/복수건이면 SystemExit(골든 무결성 게이트)."""
     member, no = key.split(None, 1)
@@ -72,6 +93,7 @@ def build(conn, idf, default_idf, golden):
 def main():
     conn = open_db()
     conn.row_factory = sqlite3.Row  # db_similar가 키 접근 사용
+    ensure_fts(conn)
     idf, default_idf = simmatch.load_idf(conn)
     golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8")) if GOLDEN_PATH.exists() else []
     n_auto, n_golden, n_none = build(conn, idf, default_idf, golden)
