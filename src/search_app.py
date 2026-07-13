@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """폐쇄망용 약관 검색 웹앱 — Python 표준 라이브러리만 사용(단일 파일).
 
-terms_dist*.db 하나와 이 파일만 반입하면 동작:
+terms_dist*.db + simmatch.py + diff_render.py와 이 파일을 반입하면 동작:
     python3 search_app.py --db terms_dist_current.db --port 8765
 
 기능:
@@ -211,7 +211,7 @@ class App(http.server.BaseHTTPRequestHandler):
             else:
                 reason = ("유사도가 낮아 차이 표시 생략(대응 조문이 아닐 수 있음)"
                           if r["score"] < App.DIFF_MIN_SCORE
-                          else "본문이 비어 있거나 길어 차이 표시 생략")
+                          else "본문 또는 초안이 비어 있거나 길어 차이 표시 생략")
                 body = (f"<p class='meta'>{reason}</p>"
                         f"<p class='meta'>{html.escape((r['text'] or '')[:120])}…</p>")
             out.append(f"<details{' open' if i == 0 else ''}><summary>{head}</summary>{body}</details>")
