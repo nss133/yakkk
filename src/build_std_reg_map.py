@@ -15,7 +15,7 @@ import pathlib
 import sqlite3
 
 import simmatch
-from common import open_db
+from common import FTS_DDL, FTS_MIN_CHARS, open_db
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 GOLDEN_PATH = ROOT / "catalog" / "std_reg_golden.json"
@@ -36,31 +36,37 @@ def ensure_fts(conn):
     (export_dist.py와 동일 DDL 재사용 — 반입 DB와 동일한 검색 후보/스코어 보장).
 
     이 함수는 db/terms.db 안에 clauses 전문의 FTS 섀도(약 +30% 용량)를 만들며,
-    조문 수가 바뀌면(월 갱신) 전체 재구축한다.
+    조문 집합이 바뀌면(월 갱신) 전체 재구축한다.
 
     clauses_fts는 content='clauses' 외부 콘텐츠 테이블이라 COUNT(*) FROM clauses_fts는
     clauses 신규 행이 늘어난 만큼 그대로 따라 움직인다(항등식 — content 테이블의 rowid
     집합을 반영할 뿐 섀도 인덱스가 실제로 그 문서를 색인했는지는 말해주지 않는다).
-    그래서 존재 여부·COUNT(*) 비교가 아니라, 실제로 색인된 문서 수를 세는 섀도 테이블
-    clauses_fts_docsize(문서당 1행 — DDL에 columnsize=0을 주지 않아 생성됨)의 행수와
-    clauses(길이 30자 이상) 행수를 비교해 불일치 시 DROP 후 재생성한다."""
+    그래서 존재 여부·COUNT(*) 단독 비교가 아니라, 실제로 색인된 문서 수를 세는 섀도 테이블
+    clauses_fts_docsize(문서당 1행 — DDL에 columnsize=0을 주지 않아 생성됨)의 (행수, 최대 id)와
+    clauses(길이 30자 이상)의 (행수, 최대 clause_id)를 함께 비교해 불일치 시 DROP 후 재생성한다.
+
+    (COUNT, MAX)를 함께 보는 이유: 월 갱신(update_all)이 STANDARD/REG 조문을 DELETE 후
+    재INSERT하는데(ingest_standards.py), clauses.clause_id가 AUTOINCREMENT라 재삽입 행은
+    항상 더 높은 id를 받는다. 총 개수가 그대로인 경우(예: --skip-collect 재실행, 신규
+    TERMS 문서가 없는 달) COUNT만 비교하면 통과하지만 FTS rowid는 이미 삭제된
+    clause_id를 가리키는 상태가 된다 — MAX가 함께 일치해야 동일 rowset임이 보장된다."""
     expected = conn.execute(
-        "SELECT COUNT(*) FROM clauses WHERE length(text) >= 30").fetchone()[0]
+        f"SELECT COUNT(*), COALESCE(MAX(clause_id),0) FROM clauses WHERE length(text) >= {FTS_MIN_CHARS}"
+    ).fetchone()
+    expected = tuple(expected)
     try:
-        indexed = conn.execute("SELECT COUNT(*) FROM clauses_fts_docsize").fetchone()[0]
+        indexed = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id),0) FROM clauses_fts_docsize").fetchone()
+        indexed = tuple(indexed)
     except sqlite3.OperationalError:
-        indexed = -1  # FTS 자체가 없음
+        indexed = None  # FTS 자체가 없음
     if indexed == expected:
         return
     conn.execute("DROP TABLE IF EXISTS clauses_fts")
-    conn.executescript("""
-        CREATE VIRTUAL TABLE clauses_fts USING fts5(
-            text, title, content='clauses', content_rowid='clause_id'
-        );
-    """)
-    conn.execute("""
+    conn.executescript(f"{FTS_DDL};")
+    conn.execute(f"""
         INSERT INTO clauses_fts(rowid, text, title)
-        SELECT clause_id, text, COALESCE(title,'') FROM clauses WHERE length(text) >= 30
+        SELECT clause_id, text, COALESCE(title,'') FROM clauses WHERE length(text) >= {FTS_MIN_CHARS}
     """)
     conn.commit()
 
@@ -86,6 +92,13 @@ def resolve_clause(conn, key: str, title: str | None = None) -> int:
 def build(conn, idf, default_idf, golden):
     conn.execute(SCHEMA)
     conn.execute("DELETE FROM std_reg_map")
+    seen, dups = set(), []
+    for e in golden:
+        if e["std"] in seen:
+            dups.append(e["std"])
+        seen.add(e["std"])
+    if dups:
+        raise SystemExit(f"골든 리스트에 중복된 std 키 존재(마지막 항목이 조용히 덮어씀): {sorted(set(dups))}")
     overrides = {resolve_clause(conn, e["std"], e.get("title")): e for e in golden}
     stds = conn.execute(
         "SELECT c.clause_id, c.clause_no, c.title, c.text FROM clauses c "

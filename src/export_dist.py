@@ -11,7 +11,7 @@ import argparse
 import pathlib
 import sqlite3
 
-from common import DB_PATH, ROOT
+from common import DB_PATH, FTS_DDL, FTS_MIN_CHARS, ROOT
 
 
 def main():
@@ -30,7 +30,8 @@ def main():
         ddl_row = src.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tbl,)).fetchone()
         if ddl_row is None:
-            print(f"  (건너뜀: {tbl} 없음 — build_simindex 먼저 실행 권장)")
+            hint = "build_std_reg_map" if tbl == "std_reg_map" else "build_simindex"
+            print(f"  (건너뜀: {tbl} 없음 — {hint} 먼저 실행 권장)")
             continue
         ddl = ddl_row[0]
         src.execute(ddl.replace(f"TABLE {tbl}", f"TABLE dist.{tbl}", 1)
@@ -59,16 +60,14 @@ def main():
     src.close()
 
     dist = sqlite3.connect(DIST_PATH)
-    dist.executescript("""
+    dist.executescript(f"""
         CREATE INDEX idx_documents_member ON documents(member_cd);
         CREATE INDEX idx_clauses_doc2 ON clauses(doc_id);
-        CREATE VIRTUAL TABLE clauses_fts USING fts5(
-            text, title, content='clauses', content_rowid='clause_id'
-        );
+        {FTS_DDL};
     """)
-    dist.execute("""
+    dist.execute(f"""
         INSERT INTO clauses_fts(rowid, text, title)
-        SELECT clause_id, text, COALESCE(title,'') FROM clauses WHERE length(text) >= 30
+        SELECT clause_id, text, COALESCE(title,'') FROM clauses WHERE length(text) >= {FTS_MIN_CHARS}
     """)
     dist.commit()
 

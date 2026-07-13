@@ -220,6 +220,8 @@ class App(http.server.BaseHTTPRequestHandler):
     def _bridge_reg(self, c, std_clause_id):
         """top-1 표준약관 조문의 사전 매핑 조회 → (none사유|None, 매핑 rows|None).
         std_reg_map 부재(구버전 반입 DB)·연결 없음(c=None)이면 (None, None) — 브릿지 비활성 폴백."""
+        if c is None:
+            return None, None
         try:
             none_row = c.execute(
                 "SELECT note FROM std_reg_map WHERE std_clause_id=? AND source='none'",
@@ -236,7 +238,7 @@ class App(http.server.BaseHTTPRequestHandler):
                    WHERE m.std_clause_id=? ORDER BY m.score DESC""",
                 (std_clause_id,)).fetchall()
             return None, [dict(r) for r in rows]
-        except (sqlite3.OperationalError, AttributeError):
+        except sqlite3.OperationalError:
             return None, None
 
     def _render_reg_section(self, c, std, reg, query):

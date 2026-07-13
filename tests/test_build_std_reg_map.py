@@ -69,6 +69,17 @@ def test_unresolved_golden_key_exits():
         bm.build(c, {}, 1.0, golden=[{"std": "STD_L 제999조", "none": "x"}])
 
 
+def test_duplicate_golden_std_key_exits():
+    # 동일 "std" 키가 두 번 등장하면 dict comprehension이 마지막 항목으로 조용히
+    # 덮어쓰므로(silent last-win), 빌드 전에 즉시 실패해야 한다.
+    c = _db()
+    with pytest.raises(SystemExit):
+        bm.build(c, {}, 1.0, golden=[
+            {"std": "STD_L 제34조", "none": "사유1"},
+            {"std": "STD_L 제34조", "none": "사유2"},
+        ])
+
+
 def test_duplicate_clause_no_disambiguated_by_title(monkeypatch):
     # STD_S 실측 사례: 표 파싱 부산물로 동일 clause_no가 중복 존재 →
     # title 없이 실패(무결성 게이트 유지), title 지정 시 정확히 1건으로 해석.
@@ -99,3 +110,16 @@ def test_ensure_fts_rebuilds_when_stale():
     assert c.execute("SELECT COUNT(*) FROM clauses_fts WHERE clauses_fts MATCH 'zzznewtoken77'").fetchone()[0] == 0
     bm.ensure_fts(c)  # 스테일 감지 → 전체 재구축
     assert c.execute("SELECT COUNT(*) FROM clauses_fts WHERE clauses_fts MATCH 'zzznewtoken77'").fetchone()[0] == 1
+
+
+def test_ensure_fts_rebuilds_on_same_count_reingest():
+    # 월 갱신 실측 시나리오: DELETE+재INSERT로 개수는 같고 rowid만 상승(AUTOINCREMENT)
+    c = _db()
+    c.execute("UPDATE clauses SET text = text || '" + "가" * 30 + "'")
+    bm.ensure_fts(c)
+    old = c.execute("SELECT clause_id, doc_id, seq, clause_no, title FROM clauses WHERE clause_id=10").fetchone()
+    c.execute("DELETE FROM clauses WHERE clause_id=10")
+    c.execute("INSERT INTO clauses VALUES(31,?,?,?,?, 'zzzreingest88 " + "다" * 30 + "')",
+              (old["doc_id"], old["seq"], old["clause_no"], old["title"]))
+    bm.ensure_fts(c)  # 개수 동일하지만 MAX 상승 → 재구축해야 함
+    assert c.execute("SELECT COUNT(*) FROM clauses_fts WHERE clauses_fts MATCH 'zzzreingest88'").fetchone()[0] == 1
