@@ -47,6 +47,28 @@ def test_strip_md_inline_leaves_normal_text():
     assert sp.strip_md_inline(t) == t
 
 
+def test_strip_md_inline_anchor_only_at_line_end():
+    # 앵커는 줄末 한정 — 줄 중간의 ^수식(hex 6자리로 보여도)은 보존
+    t = "면적은 3^100000 제곱미터입니다"
+    assert sp.strip_md_inline(t) == t
+
+
+def test_strip_md_inline_double_anchor_one_line():
+    # 실측: 한 줄에 앵커 2개 연속 (질병상해 표준약관)
+    assert sp.strip_md_inline("지급합니다 ^966e10 ^966e10\n다음") == "지급합니다\n다음"
+
+
+def test_strip_md_inline_mangled_multi_asterisk_bold():
+    # 실측: 표준약관+질병상해보험(전문).md 351행의 ****…** **…** 오식
+    assert sp.strip_md_inline("****위험직종** **변경**시 통지") == "위험직종 변경시 통지"
+
+
+def test_strip_md_inline_wikilink_internal_anchor():
+    # 실측: [[#^hex|별칭]] 내부 앵커 링크 — 별칭만 남김
+    assert sp.strip_md_inline("[[#^6d2e06|제3조(보험금의 지급사유) 제1호]]에 따라") \
+        == "제3조(보험금의 지급사유) 제1호에 따라"
+
+
 def test_to_plaintext_md_applies_inline_strip(tmp_path):
     src = tmp_path / "std.md"
     src.write_text("제1조(목적) **이 계약**은 [[상법(전문)|상법]]을 따릅니다 ^abc123\n본문", encoding="utf-8")
