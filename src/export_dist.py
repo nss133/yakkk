@@ -26,7 +26,7 @@ def main():
     src.execute(f"ATTACH DATABASE '{DIST_PATH}' AS dist")
 
     for tbl in ("insurers", "products", "documents", "clauses", "product_doc_map",
-                "ngram_idf", "simindex_meta"):
+                "ngram_idf", "simindex_meta", "std_reg_map"):
         ddl_row = src.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tbl,)).fetchone()
         if ddl_row is None:
@@ -45,6 +45,13 @@ def main():
         elif args.current_only and tbl == "clauses":
             src.execute("INSERT INTO dist.clauses SELECT c.* FROM main.clauses c "
                         "JOIN dist.documents d USING(doc_id)")
+        elif args.current_only and tbl == "std_reg_map":
+            # 양끝 clause가 dist에 실재하는 행만(STANDARD·REG는 현행판에 항상 포함되므로 실질 전량).
+            # none 행(reg_clause_id NULL)은 std 쪽만 확인.
+            src.execute("INSERT INTO dist.std_reg_map SELECT m.* FROM main.std_reg_map m "
+                        "JOIN dist.clauses cs ON cs.clause_id = m.std_clause_id "
+                        "LEFT JOIN dist.clauses cr ON cr.clause_id = m.reg_clause_id "
+                        "WHERE m.reg_clause_id IS NULL OR cr.clause_id IS NOT NULL")
         else:
             src.execute(f"INSERT INTO dist.{tbl} SELECT * FROM main.{tbl}")
     src.commit()
