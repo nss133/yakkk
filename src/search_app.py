@@ -217,8 +217,53 @@ class App(http.server.BaseHTTPRequestHandler):
             out.append(f"<details{' open' if i == 0 else ''}><summary>{head}</summary>{body}</details>")
         return "".join(out)
 
+    def _bridge_reg(self, c, std_clause_id):
+        """top-1 표준약관 조문의 사전 매핑 조회 → (none사유|None, 매핑 rows|None).
+        std_reg_map 부재(구버전 반입 DB)·연결 없음(c=None)이면 (None, None) — 브릿지 비활성 폴백."""
+        try:
+            none_row = c.execute(
+                "SELECT note FROM std_reg_map WHERE std_clause_id=? AND source='none'",
+                (std_clause_id,)).fetchone()
+            if none_row:
+                return none_row["note"] or "", []
+            rows = c.execute(
+                """SELECT m.score, m.source, cl.clause_id, cl.clause_no, cl.title, cl.text,
+                          d.doc_id, d.prod_nm_raw, d.version_label, i.name AS insurer
+                   FROM std_reg_map m
+                   JOIN clauses cl ON cl.clause_id = m.reg_clause_id
+                   JOIN documents d ON d.doc_id = cl.doc_id
+                   JOIN insurers i ON i.member_cd = d.member_cd
+                   WHERE m.std_clause_id=? ORDER BY m.score DESC""",
+                (std_clause_id,)).fetchall()
+            return None, [dict(r) for r in rows]
+        except (sqlite3.OperationalError, AttributeError):
+            return None, None
+
+    def _render_reg_section(self, c, std, reg, query):
+        """감독규정 섹션: 브릿지(top-1 표준약관의 사전 매핑) 우선 + 직접 유사도 보충(중복 제거).
+        골든 '대응 없음' 조문은 오매핑 노출 대신 공백 사유를 안내."""
+        parts, bridge_ids = [], set()
+        if std and std[0]["score"] >= App.DIFF_MIN_SCORE:
+            note, bridge = self._bridge_reg(c, std[0]["clause_id"])
+            via = html.escape(f"{std[0]['clause_no'] or ''} {std[0]['title'] or ''}".strip())
+            if note is not None:
+                parts.append(f"<p class='meta'>📎 표준약관 {via} 경유 — 감독규정 정면 대응 조문 없음: "
+                             f"{html.escape(note)}</p>")
+            elif bridge:
+                for b in bridge:
+                    if b["source"] == "golden":
+                        b["version_label"] = ((b["version_label"] or "") + " · ✓검수").strip(" ·")
+                parts.append(f"<p class='meta'>📎 표준약관 {via} 경유(사전 매핑)</p>"
+                             + self.render_similar(bridge, query))
+                bridge_ids = {b["clause_id"] for b in bridge}
+        direct = [r for r in reg if r["clause_id"] not in bridge_ids]
+        if direct:
+            label = "<p class='meta'>직접 유사</p>" if parts else ""
+            parts.append(label + self.render_similar(direct, query))
+        return "".join(parts) or "<p>관련 감독규정·법령 없음</p>"
+
     def _similar_blocks(self, c, query, query_title=None):
-        """표준약관(diff)·감독규정·타사 3섹션을 한 번에 조회·렌더."""
+        """표준약관(diff)·감독규정(브릿지+직접)·타사 3섹션을 한 번에 조회·렌더."""
         std = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=3,
                                   query_title=query_title, doc_type="STANDARD")
         reg = simmatch.db_similar(c, query, self.idf, self.default_idf, top_n=3,
@@ -227,11 +272,11 @@ class App(http.server.BaseHTTPRequestHandler):
                                     exclude_member=self.self_member,
                                     query_title=query_title, doc_type="TERMS")
         std_html = f"<h2>📋 표준약관 대응 조문</h2>{self.render_standard_diff(std, query)}"
-        rest = self.render_sections([
-            ("📖 관련 감독규정·법령", reg, "관련 감독규정·법령 없음"),
+        reg_html = f"<h2>📖 관련 감독규정·법령</h2>{self._render_reg_section(c, std, reg, query)}"
+        terms_html = self.render_sections([
             ("🏢 타사 유사 조문", terms, "타사 유사 조문 없음"),
         ], query)
-        return f"{std_html}<hr>{rest}"
+        return f"{std_html}<hr>{reg_html}<hr>{terms_html}"
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
