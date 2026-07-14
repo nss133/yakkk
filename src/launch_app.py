@@ -45,7 +45,10 @@ def main() -> int:
     if db is None:
         print(f"DB 파일이 없습니다: {_base_dir() / 'terms_dist_current.db'}")
         print("실행파일과 같은 폴더에 terms_dist_current.db 를 두고 다시 실행하세요.")
-        input("Enter 를 누르면 종료합니다...")
+        try:
+            input("Enter 를 누르면 종료합니다...")
+        except (EOFError, ValueError, OSError):   # 헤드리스(stdin 없음/닫힘) — CI 스모크 등
+            pass
         return 1
     port = _pick_port()
     threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{port}")).start()

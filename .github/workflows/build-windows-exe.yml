@@ -20,16 +20,13 @@ jobs:
           pyinstaller --onefile --name yakgwan-search --paths src
           --hidden-import docx
           src/launch_app.py
-      - name: Smoke — exe starts and serves
-        shell: pwsh
+      - name: Smoke — DB 가드 확인
+        shell: cmd
         run: |
-          # DB 없이 실행하면 안내 후 종료(exit 1)해야 함 — 크래시가 아닌 정상 가드 확인
-          $p = Start-Process -FilePath dist/yakgwan-search.exe -PassThru -NoNewWindow `
-               -RedirectStandardOutput out.txt -RedirectStandardInput NUL
-          Start-Sleep -Seconds 8
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-          Get-Content out.txt
-          if ((Get-Content out.txt -Raw) -notmatch "DB") { exit 1 }
+          rem DB 없이 실행하면 안내 메시지 출력 후 스스로 종료해야 함(크래시 아님)
+          dist\yakgwan-search.exe < NUL > out.txt 2>&1
+          type out.txt
+          findstr "DB" out.txt
       - uses: actions/upload-artifact@v4
         with:
           name: yakgwan-search-exe
