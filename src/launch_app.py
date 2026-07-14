@@ -41,6 +41,13 @@ def _pick_port(start: int = 8765, tries: int = 10) -> int:
 
 
 def main() -> int:
+    # 콘솔 인코딩이 한글을 못 담는 환경(cp1252 등)에서 print 크래시 방지 —
+    # 한국어 콘솔(cp949/utf-8)은 그대로, 그 외에는 '?' 대체 출력
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError):
+            pass
     db = _find_db()
     if db is None:
         print(f"DB 파일이 없습니다: {_base_dir() / 'terms_dist_current.db'}")
