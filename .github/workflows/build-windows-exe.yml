@@ -1,0 +1,37 @@
+# 폐쇄망 반입용 Windows 단일 실행파일 빌드 (수동 트리거)
+# 산출물: yakgwan-search.exe (python 런타임 + python-docx 내장, DB는 별도 동봉)
+name: build-windows-exe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build deps
+        run: pip install pyinstaller python-docx
+      - name: Build onefile exe
+        run: >
+          pyinstaller --onefile --name yakgwan-search --paths src
+          --hidden-import docx
+          src/launch_app.py
+      - name: Smoke — exe starts and serves
+        shell: pwsh
+        run: |
+          # DB 없이 실행하면 안내 후 종료(exit 1)해야 함 — 크래시가 아닌 정상 가드 확인
+          $p = Start-Process -FilePath dist/yakgwan-search.exe -PassThru -NoNewWindow `
+               -RedirectStandardOutput out.txt -RedirectStandardInput NUL
+          Start-Sleep -Seconds 8
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Get-Content out.txt
+          if ((Get-Content out.txt -Raw) -notmatch "DB") { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yakgwan-search-exe
+          path: dist/yakgwan-search.exe
+          retention-days: 7
